@@ -1,11 +1,17 @@
 import { useState, useRef, useCallback } from "react";
 
-const TRANCHES = [
-  { min: 0, max: 10000, rate: 0.10, label: "0 → 10k" },
-  { min: 10000, max: 50000, rate: 0.05, label: "10k → 50k" },
-  { min: 50000, max: 100000, rate: 0.02, label: "50k → 100k" },
-  { min: 100000, max: Infinity, rate: 0.01, label: "100k+" },
+const DEFAULT_TRANCHES = [
+  { min: 0, max: 10000, rate: 0.10 },
+  { min: 10000, max: 50000, rate: 0.05 },
+  { min: 50000, max: 100000, rate: 0.02 },
+  { min: 100000, max: Infinity, rate: 0.01 },
 ];
+
+function trancheLabel(t) {
+  const fmtK = (v) => v >= 1000 ? (v / 1000) + "k" : v.toString();
+  if (t.max === Infinity) return fmtK(t.min) + "+";
+  return fmtK(t.min) + " → " + fmtK(t.max);
+}
 
 const YEAR_COEFFICIENTS = [
   { year: 1, coeff: 1.0, label: "An 1" },
@@ -17,17 +23,21 @@ const YEAR_COEFFICIENTS = [
 
 const COLORS = ["#f59e0b", "#3b82f6", "#22c55e", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#f97316"];
 
-function calcCommission(ca) {
+function calcCommission(ca, tranches, useTranches, flatRate) {
+  if (!useTranches) {
+    const total = ca * flatRate;
+    return { total, details: [{ label: "Taux unique", base: ca, rate: flatRate, commission: total }] };
+  }
   let remaining = ca;
   let total = 0;
   const details = [];
-  for (const t of TRANCHES) {
+  for (const t of tranches) {
     if (remaining <= 0) break;
     const trancheSize = t.max === Infinity ? remaining : t.max - t.min;
     const applicable = Math.min(remaining, trancheSize);
     const comm = applicable * t.rate;
     if (applicable > 0) {
-      details.push({ label: t.label, base: applicable, rate: t.rate, commission: comm });
+      details.push({ label: trancheLabel(t), base: applicable, rate: t.rate, commission: comm });
     }
     total += comm;
     remaining -= applicable;
@@ -182,6 +192,9 @@ function SpiderChart({ people, onChange, envelope }) {
 export default function Simulator() {
   const [sliderVal, setSliderVal] = useState(caToSlider(25000));
   const [yearIdx, setYearIdx] = useState(0);
+  const [useTranches, setUseTranches] = useState(true);
+  const [tranches, setTranches] = useState(DEFAULT_TRANCHES);
+  const [flatRate, setFlatRate] = useState(0.05);
   const [nbPeople, setNbPeople] = useState(3);
   const [people, setPeople] = useState([
     { name: "Intro", pct: 30 },
@@ -191,7 +204,7 @@ export default function Simulator() {
   const [editingName, setEditingName] = useState(null);
 
   const ca = sliderToCA(sliderVal);
-  const { total: baseCommission, details } = calcCommission(ca);
+  const { total: baseCommission, details } = calcCommission(ca, tranches, useTranches, flatRate);
   const yearCoeff = YEAR_COEFFICIENTS[yearIdx].coeff;
   const finalCommission = baseCommission * yearCoeff;
   const effectiveRate = ca > 0 ? (finalCommission / ca) * 100 : 0;
@@ -201,15 +214,25 @@ export default function Simulator() {
   const handleNbChange = (nb) => {
     const newNb = Math.max(1, Math.min(6, nb));
     setNbPeople(newNb);
-    if (newNb > people.length) {
+    const current = people.length;
+    let newPeople;
+    if (newNb > current) {
       const added = [];
-      for (let i = people.length; i < newNb; i++) {
+      for (let i = current; i < newNb; i++) {
         added.push({ name: NAMES[i] || `P${i + 1}`, pct: 0 });
       }
-      setPeople([...people, ...added]);
+      newPeople = [...people, ...added];
     } else {
-      setPeople(people.slice(0, newNb));
+      newPeople = people.slice(0, newNb);
     }
+    // Redistribute evenly so total is always 100%
+    const base = Math.floor(100 / newNb / 10) * 10;
+    const remainder = 100 - base * newNb;
+    newPeople = newPeople.map((p, i) => ({
+      ...p,
+      pct: base + (i < remainder / 10 ? 10 : 0),
+    }));
+    setPeople(newPeople);
   };
 
   const updatePct = useCallback((idx, val) => {
@@ -219,6 +242,48 @@ export default function Simulator() {
   const updateName = (idx, name) => {
     setPeople(prev => prev.map((p, i) => (i === idx ? { ...p, name } : p)));
   };
+
+  const updateTrancheRate = (idx, rate) => {
+    setTranches(prev => prev.map((t, i) => i === idx ? { ...t, rate } : t));
+  };
+  const updateTrancheMax = (idx, max) => {
+    setTranches(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], max };
+      if (idx + 1 < next.length) {
+        next[idx + 1] = { ...next[idx + 1], min: max };
+      }
+      return next;
+    });
+  };
+  const addTranche = () => {
+    setTranches(prev => {
+      const last = prev[prev.length - 1];
+      const newMin = last.min;
+      const newBoundary = newMin + 50000;
+      return [
+        ...prev.slice(0, -1),
+        { min: newMin, max: newBoundary, rate: last.rate },
+        { min: newBoundary, max: Infinity, rate: Math.max(0.005, last.rate / 2) },
+      ];
+    });
+  };
+  const removeTranche = (idx) => {
+    if (tranches.length <= 1) return;
+    setTranches(prev => {
+      const next = [...prev];
+      next.splice(idx, 1);
+      if (idx === 0 && next.length > 0) {
+        next[0] = { ...next[0], min: 0 };
+      } else if (idx === next.length) {
+        next[next.length - 1] = { ...next[next.length - 1], max: Infinity };
+      } else {
+        next[idx] = { ...next[idx], min: prev[idx - 1]?.max ?? next[idx].min };
+      }
+      return next;
+    });
+  };
+  const resetTranches = () => setTranches(DEFAULT_TRANCHES);
 
   const ticks = [1000, 5000, 10000, 50000, 100000, 500000, 1000000];
 
@@ -267,7 +332,9 @@ export default function Simulator() {
             Anatole — Apport d'affaires
           </h1>
           <p style={{ color: "#64748b", fontSize: 11, margin: "4px 0 0" }}>
-            Tranches : 10% → 10k · 5% → 50k · 2% → 100k · 1% au-delà
+            {useTranches
+              ? "Tranches : " + tranches.map(t => `${(t.rate * 100).toFixed(0)}% → ${trancheLabel(t)}`).join(" · ")
+              : `Taux unique : ${(flatRate * 100).toFixed(1)}%`}
           </p>
         </div>
 
@@ -293,6 +360,95 @@ export default function Simulator() {
               </span>
             ))}
           </div>
+        </div>
+
+        {/* Tranches config */}
+        <div style={{ background: "#111827", borderRadius: 12, padding: 14, marginBottom: 12, border: "1px solid #1e293b" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Mode de calcul</label>
+            <div style={{ display: "flex", gap: 5 }}>
+              <button onClick={() => setUseTranches(true)} style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 11, fontFamily: "inherit", fontWeight: 600, cursor: "pointer",
+                border: useTranches ? "1px solid #f59e0b" : "1px solid #1e293b",
+                background: useTranches ? "#f59e0b20" : "#0a0f1a",
+                color: useTranches ? "#f59e0b" : "#64748b",
+              }}>Tranches</button>
+              <button onClick={() => setUseTranches(false)} style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 11, fontFamily: "inherit", fontWeight: 600, cursor: "pointer",
+                border: !useTranches ? "1px solid #f59e0b" : "1px solid #1e293b",
+                background: !useTranches ? "#f59e0b20" : "#0a0f1a",
+                color: !useTranches ? "#f59e0b" : "#64748b",
+              }}>Taux unique</button>
+            </div>
+          </div>
+
+          {!useTranches && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+              <label style={{ fontSize: 11, color: "#64748b" }}>Taux :</label>
+              <input type="number" min={0} max={100} step={0.5}
+                value={+(flatRate * 100).toFixed(1)}
+                onChange={(e) => setFlatRate(Math.max(0, Math.min(1, (+e.target.value || 0) / 100)))}
+                style={{ width: 75, fontSize: 13, fontWeight: 600 }}
+              />
+              <span style={{ fontSize: 12, color: "#64748b" }}>%</span>
+            </div>
+          )}
+
+          {useTranches && (
+            <div>
+              <div style={{ display: "grid", gap: 4 }}>
+                {tranches.map((t, i) => (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", gap: 6, padding: "5px 8px",
+                    background: "#0a0f1a", borderRadius: 6, border: "1px solid #1e293b",
+                  }}>
+                    <span style={{ fontSize: 10, color: "#64748b", minWidth: 60, flexShrink: 0 }}>
+                      {(t.min / 1000).toFixed(0)}k →
+                    </span>
+                    {t.max === Infinity ? (
+                      <span style={{ fontSize: 10, color: "#64748b", minWidth: 45 }}>∞</span>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 45 }}>
+                        <input type="number" min={t.min + 1000} step={1000}
+                          value={t.max}
+                          onChange={(e) => updateTrancheMax(i, Math.max(t.min + 1000, +e.target.value || 0))}
+                          style={{ width: 70, fontSize: 11, padding: "3px 5px" }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: "auto" }}>
+                      <input type="number" min={0} max={100} step={0.5}
+                        value={+(t.rate * 100).toFixed(1)}
+                        onChange={(e) => updateTrancheRate(i, Math.max(0, Math.min(1, (+e.target.value || 0) / 100)))}
+                        style={{ width: 60, fontSize: 11, padding: "3px 5px" }}
+                      />
+                      <span style={{ fontSize: 10, color: "#64748b" }}>%</span>
+                    </div>
+                    {tranches.length > 1 && (
+                      <button onClick={() => removeTranche(i)} style={{
+                        width: 22, height: 22, borderRadius: 4, border: "1px solid #1e293b",
+                        background: "#0a0f1a", color: "#ef4444", cursor: "pointer",
+                        fontFamily: "inherit", fontSize: 13, lineHeight: 1, display: "flex",
+                        alignItems: "center", justifyContent: "center",
+                      }}>×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button onClick={addTranche} style={{
+                  padding: "4px 10px", borderRadius: 5, fontSize: 10, fontFamily: "inherit",
+                  border: "1px solid #1e293b", background: "#0a0f1a", color: "#94a3b8",
+                  cursor: "pointer", fontWeight: 500,
+                }}>+ Ajouter tranche</button>
+                <button onClick={resetTranches} style={{
+                  padding: "4px 10px", borderRadius: 5, fontSize: 10, fontFamily: "inherit",
+                  border: "1px solid #1e293b", background: "#0a0f1a", color: "#64748b",
+                  cursor: "pointer", fontWeight: 400,
+                }}>Réinitialiser</button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Year */}
