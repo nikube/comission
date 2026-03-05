@@ -518,6 +518,69 @@ export default function Simulator() {
           </div>
         </div>
 
+        {/* Commission curve chart */}
+        {(() => {
+          const chartW = 600, chartH = 200, padL = 55, padR = 15, padT = 15, padB = 30;
+          const w = chartW - padL - padR, h = chartH - padT - padB;
+          const caSteps = [];
+          for (let c = 1000; c <= 1000000; c += 1000) caSteps.push(c);
+          const maxCA = 1000000;
+          const points = caSteps.map(c => {
+            const comm = calcCommission(c, tranches, useTranches, flatRate).total * yearCoeff;
+            return { ca: c, comm };
+          });
+          const maxComm = Math.max(...points.map(p => p.comm), 1);
+          const toX = (c) => padL + (c / maxCA) * w;
+          const toY = (v) => padT + h - (v / maxComm) * h;
+          const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${toX(p.ca).toFixed(1)},${toY(p.comm).toFixed(1)}`).join(" ");
+          const areaD = pathD + ` L${toX(maxCA).toFixed(1)},${toY(0).toFixed(1)} L${toX(1000).toFixed(1)},${toY(0).toFixed(1)} Z`;
+          const currentComm = finalCommission;
+          const gridCAs = [0, 200000, 400000, 600000, 800000, 1000000];
+          const gridComms = [];
+          const commStep = Math.pow(10, Math.floor(Math.log10(maxComm || 1)));
+          for (let g = 0; g <= maxComm; g += commStep) gridComms.push(g);
+          if (gridComms.length < 3) {
+            const half = commStep / 2;
+            for (let g = half; g <= maxComm; g += commStep) gridComms.push(g);
+            gridComms.sort((a, b) => a - b);
+          }
+
+          return (
+            <div style={{ background: "#111827", borderRadius: 12, padding: "14px 10px", marginBottom: 12, border: "1px solid #1e293b" }}>
+              <label style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, display: "block", marginBottom: 8, paddingLeft: 8 }}>
+                Courbe d'apport selon CA
+              </label>
+              <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{ width: "100%", display: "block" }}>
+                {gridComms.map((g, i) => (
+                  <g key={"gy" + i}>
+                    <line x1={padL} x2={chartW - padR} y1={toY(g)} y2={toY(g)} stroke="#1e293b" strokeWidth={0.5} />
+                    <text x={padL - 5} y={toY(g) + 3} textAnchor="end" fill="#475569" fontSize={8}
+                      fontFamily="'JetBrains Mono', monospace">{fmt(Math.round(g))}€</text>
+                  </g>
+                ))}
+                {gridCAs.map((g, i) => (
+                  <g key={"gx" + i}>
+                    <line x1={toX(g)} x2={toX(g)} y1={padT} y2={padT + h} stroke="#1e293b" strokeWidth={0.5} />
+                    <text x={toX(g)} y={chartH - 5} textAnchor="middle" fill="#475569" fontSize={8}
+                      fontFamily="'JetBrains Mono', monospace">{formatCA(g || 0)}</text>
+                  </g>
+                ))}
+                <path d={areaD} fill="rgba(245, 158, 11, 0.08)" />
+                <path d={pathD} fill="none" stroke="#f59e0b" strokeWidth={2} />
+                {ca >= 1000 && ca <= 1000000 && (
+                  <g>
+                    <line x1={toX(ca)} x2={toX(ca)} y1={padT} y2={toY(0)} stroke="#f59e0b" strokeWidth={0.7} strokeDasharray="3,3" opacity={0.5} />
+                    <line x1={padL} x2={toX(ca)} y1={toY(currentComm)} y2={toY(currentComm)} stroke="#f59e0b" strokeWidth={0.7} strokeDasharray="3,3" opacity={0.5} />
+                    <circle cx={toX(ca)} cy={toY(currentComm)} r={5} fill="#f59e0b" stroke="#0a0f1a" strokeWidth={2} />
+                    <text x={toX(ca)} y={toY(currentComm) - 10} textAnchor="middle" fill="#fbbf24" fontSize={9.5}
+                      fontFamily="'JetBrains Mono', monospace" fontWeight={700}>{fmt(Math.round(currentComm))}€</text>
+                  </g>
+                )}
+              </svg>
+            </div>
+          );
+        })()}
+
         {/* Distribution */}
         <div style={{ background: "#111827", borderRadius: 12, padding: 20, border: "1px solid #1e293b" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
