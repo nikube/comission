@@ -61,8 +61,6 @@ export default function ValuationSimulator() {
   const [boundIG, setBoundIG] = useState(4);
 
   const [caGrowth, setCaGrowth] = useState(25);
-  const [recurrentPct, setRecurrentPct] = useState(30);
-  const [multipleRec, setMultipleRec] = useState(5);
   const [chargesGrowth, setChargesGrowth] = useState(10);
 
   const adjustPonderation = (key, newVal) => {
@@ -100,8 +98,7 @@ export default function ValuationSimulator() {
     const caP = ca * Math.pow(1 + caGrowth / 100, years);
     const chargesP = charges * Math.pow(1 + chargesGrowth / 100, years);
     const ebitdaP = Math.max(0, caP * (margePct / 100) - chargesP);
-    const recurrent = caP * (recurrentPct / 100) * multipleRec;
-    const ebitdaValueP = ebitdaP * multiple + recurrent;
+    const ebitdaValueP = ebitdaP * multiple;
     const caValueP = caP * coeffCA;
     const sasP =
         anc * (ponderation.anc / 100)
@@ -110,7 +107,7 @@ export default function ValuationSimulator() {
     const partP = nbAssocies > 0 ? sasP / nbAssocies : 0;
     return {
       ca: caP, charges: chargesP, ebitda: ebitdaP,
-      recurrent, ebitdaValue: ebitdaValueP, caValue: caValueP,
+      ebitdaValue: ebitdaValueP, caValue: caValueP,
       sas: sasP, part: partP,
       goodPrice: partP * (coeffGood / 100),
       deltaGoodVsToday: (partP - prixPart) * (coeffGood / 100),
@@ -369,20 +366,15 @@ export default function ValuationSimulator() {
         {showProj && (
           <div style={{ marginTop: 14 }}>
             <Help>
-              On projette le CA en croissance composée annuelle, on applique la même structure
-              de coûts (avec inflation des charges), et on capitalise une part <strong>récurrente</strong>
-              qui mérite un multiple plus élevé qu'un revenu projet ponctuel — c'est le levier
-              pour faire monter la valo. Le tableau compare N+3 et N+5 vs aujourd'hui.
+              On projette le CA en croissance composée annuelle, en appliquant la même structure
+              de coûts (avec inflation des charges). Le tableau compare la valorisation et le prix
+              de la part à N+3 et N+5 vs aujourd'hui.
             </Help>
 
             <Slider label="Croissance annuelle du CA" min={0} max={50} step={1}
               value={caGrowth} onChange={setCaGrowth} unit="%/an" />
             <Slider label="Croissance annuelle des charges" min={0} max={30} step={1}
               value={chargesGrowth} onChange={setChargesGrowth} unit="%/an" />
-            <Slider label="% de récurrent dans le CA cible" min={0} max={60} step={1}
-              value={recurrentPct} onChange={setRecurrentPct} unit="%" />
-            <Slider label="Multiple sur part récurrente" min={4} max={8} step={0.5}
-              value={multipleRec} onChange={setMultipleRec} unit="×" />
 
             {/* Comparison table: today | N+3 | N+5 */}
             <div style={{
@@ -401,7 +393,6 @@ export default function ValuationSimulator() {
                 {[
                   { label: "CA", today: ca, n3: projN3.ca, n5: projN5.ca, unit: "€" },
                   { label: "EBITDA normatif", today: ebitdaNormatif, n3: projN3.ebitda, n5: projN5.ebitda, unit: "€" },
-                  { label: "Récurrent capitalisé", today: 0, n3: projN3.recurrent, n5: projN5.recurrent, unit: "€" },
                   { label: "Valorisation SAS", today: valeurSAS, n3: projN3.sas, n5: projN5.sas, unit: "€", bold: true },
                   { label: "Prix par part", today: prixPart, n3: projN3.part, n5: projN5.part, unit: "€", bold: true },
                   { label: "Good leaver / part", today: prix.good, n3: projN3.goodPrice, n5: projN5.goodPrice, unit: "€" },
@@ -459,8 +450,8 @@ export default function ValuationSimulator() {
               }}>
                 <strong style={{ color: "#94a3b8" }}>Lecture :</strong> à {caGrowth}%/an de
                 croissance, le CA passe de {fmt(Math.round(ca))}€ à {fmt(Math.round(projN5.ca))}€ en 5 ans.
-                Le multiple sur la part récurrente ({multipleRec}×) capitalise les abonnements/contrats
-                cadres comme un actif, ce qui amplifie la valo bien plus que le multiple EBITDA seul.
+                La valo suit grâce à l'effet combiné EBITDA × multiple et CA × coefficient,
+                pondérés selon les choix de la Carte 1.
               </div>
             </div>
           </div>
