@@ -8,6 +8,18 @@ const CARD_BG = "#111827";
 const CARD_BORDER = "#1e293b";
 const ORANGE = "#f59e0b";
 
+function Help({ children }) {
+  return (
+    <div style={{
+      fontSize: 11, color: "#64748b", fontStyle: "italic", lineHeight: 1.5,
+      padding: "8px 10px", background: "#0a0f1a", borderLeft: `2px solid ${ORANGE}80`,
+      borderRadius: 4, marginBottom: 14,
+    }}>
+      {children}
+    </div>
+  );
+}
+
 function Slider({ label, min, max, step, value, onChange, unit, suffix }) {
   return (
     <div style={{ marginBottom: 12 }}>
@@ -48,9 +60,10 @@ export default function ValuationSimulator() {
   const [boundIB, setBoundIB] = useState(2);
   const [boundIG, setBoundIG] = useState(4);
 
-  const [caN3, setCaN3] = useState(300000);
+  const [caGrowth, setCaGrowth] = useState(25);
   const [recurrentPct, setRecurrentPct] = useState(30);
   const [multipleRec, setMultipleRec] = useState(5);
+  const [chargesGrowth, setChargesGrowth] = useState(10);
 
   const adjustPonderation = (key, newVal) => {
     const others = Object.keys(ponderation).filter(k => k !== key);
@@ -83,16 +96,30 @@ export default function ValuationSimulator() {
     bad: prixPart * (coeffBad / 100),
   };
 
-  const ebitdaProj = Math.max(0, caN3 * (margePct / 100) - charges);
-  const recurrentValue = caN3 * (recurrentPct / 100) * multipleRec;
-  const valeurEBITDAProj = ebitdaProj * multiple + recurrentValue;
-  const valeurCAProj = caN3 * coeffCA;
-  const valeurSASProj =
-      anc * (ponderation.anc / 100)
-    + valeurEBITDAProj * (ponderation.ebitda / 100)
-    + valeurCAProj * (ponderation.ca / 100);
-  const prixPartProj = nbAssocies > 0 ? valeurSASProj / nbAssocies : 0;
-  const deltaGood = (prixPartProj - prixPart) * (coeffGood / 100);
+  const projectAt = (years) => {
+    const caP = ca * Math.pow(1 + caGrowth / 100, years);
+    const chargesP = charges * Math.pow(1 + chargesGrowth / 100, years);
+    const ebitdaP = Math.max(0, caP * (margePct / 100) - chargesP);
+    const recurrent = caP * (recurrentPct / 100) * multipleRec;
+    const ebitdaValueP = ebitdaP * multiple + recurrent;
+    const caValueP = caP * coeffCA;
+    const sasP =
+        anc * (ponderation.anc / 100)
+      + ebitdaValueP * (ponderation.ebitda / 100)
+      + caValueP * (ponderation.ca / 100);
+    const partP = nbAssocies > 0 ? sasP / nbAssocies : 0;
+    return {
+      ca: caP, charges: chargesP, ebitda: ebitdaP,
+      recurrent, ebitdaValue: ebitdaValueP, caValue: caValueP,
+      sas: sasP, part: partP,
+      goodPrice: partP * (coeffGood / 100),
+      deltaGoodVsToday: (partP - prixPart) * (coeffGood / 100),
+      deltaSasVsToday: sasP - valeurSAS,
+      multiplierVsToday: prixPart > 0 ? partP / prixPart : 0,
+    };
+  };
+  const projN3 = projectAt(3);
+  const projN5 = projectAt(5);
 
   const cardStyle = {
     background: CARD_BG, borderRadius: 12, padding: 18,
@@ -120,6 +147,13 @@ export default function ValuationSimulator() {
             }}>Expert</button>
           </div>
         </div>
+
+        <Help>
+          Les paramètres économiques de la SAS pour aujourd'hui. Le <strong>CA</strong> est le chiffre
+          d'affaires qui transite par la holding. La <strong>marge laissée</strong> est ce qui n'est
+          pas redistribué en commissions (devient l'EBITDA après charges). En mode <strong>Expert</strong>,
+          tu débloques le multiple, le coefficient %CA, l'ANC et la pondération des trois méthodes.
+        </Help>
 
         <Slider label="CA total annuel SAS" min={50000} max={1000000} step={5000}
           value={ca} onChange={setCa} unit="€" />
@@ -220,11 +254,29 @@ export default function ValuationSimulator() {
         </div>
       </div>
 
+      <Help>
+        <strong>Comment lire :</strong> on calcule trois valeurs en parallèle puis on en fait
+        une moyenne pondérée. <strong>ANC</strong> = capitaux propres + tréso (plancher patrimonial).
+        <strong> EBITDA × multiple</strong> = capacité à générer du résultat × prime de marché (3-6× pour
+        un cabinet de conseil). <strong>CA × coefficient</strong> = proxy de la base clients
+        (40-50 % du CA récurrent typiquement). La pondération reflète ce qui compte le plus dans
+        ton modèle. Le résultat divisé par le nombre d'associés donne le prix de référence d'une part.
+      </Help>
+
       {/* Card 3 — Prix par part selon départ */}
       <div style={cardStyle}>
         <div style={{ fontSize: 13, color: "#cbd5e1", fontWeight: 600, marginBottom: 14 }}>
           Prix par part selon le motif de départ
         </div>
+        <Help>
+          Trois conditions de départ d'un associé. <strong style={{ color: "#22c55e" }}>Good leaver</strong> :
+          départ négocié (retraite, maladie, accord mutuel) → 100 % du prix.
+          <strong style={{ color: "#f59e0b" }}> Intermediate</strong> : départ volontaire dans des
+          conditions normales → décote modérée. <strong style={{ color: "#ef4444" }}>Bad leaver</strong> :
+          faute, concurrence déloyale, départ avant ancienneté minimale → forte décote.
+          Les coefficients et les seuils d'ancienneté sont éditables — ce sont les paramètres
+          principaux à figer dans le pacte.
+        </Help>
         <div style={{ display: "grid", gap: 6 }}>
           {[
             { key: "good", label: "Good leaver", coeff: coeffGood, set: setCoeffGood, color: "#22c55e", price: prix.good },
@@ -303,43 +355,112 @@ export default function ValuationSimulator() {
         </div>
       </div>
 
-      {/* Card 4 — Projection N+3 */}
+      {/* Card 4 — Projection N+3 / N+5 */}
       <div style={cardStyle}>
         <button onClick={() => setShowProj(!showProj)} style={{
           width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
           background: "transparent", border: "none", color: "#cbd5e1", fontSize: 13,
           fontWeight: 600, fontFamily: "inherit", cursor: "pointer", padding: 0,
         }}>
-          <span>Projection à 3 ans</span>
+          <span>Projection à 3 ans et 5 ans</span>
           <span style={{ color: "#64748b", fontSize: 14 }}>{showProj ? "▾" : "▸"}</span>
         </button>
 
         {showProj && (
           <div style={{ marginTop: 14 }}>
-            <Slider label="CA projeté année N+3" min={100000} max={1000000} step={5000}
-              value={caN3} onChange={setCaN3} unit="€" />
-            <Slider label="% de récurrent dans le CA" min={0} max={60} step={1}
+            <Help>
+              On projette le CA en croissance composée annuelle, on applique la même structure
+              de coûts (avec inflation des charges), et on capitalise une part <strong>récurrente</strong>
+              qui mérite un multiple plus élevé qu'un revenu projet ponctuel — c'est le levier
+              pour faire monter la valo. Le tableau compare N+3 et N+5 vs aujourd'hui.
+            </Help>
+
+            <Slider label="Croissance annuelle du CA" min={0} max={50} step={1}
+              value={caGrowth} onChange={setCaGrowth} unit="%/an" />
+            <Slider label="Croissance annuelle des charges" min={0} max={30} step={1}
+              value={chargesGrowth} onChange={setChargesGrowth} unit="%/an" />
+            <Slider label="% de récurrent dans le CA cible" min={0} max={60} step={1}
               value={recurrentPct} onChange={setRecurrentPct} unit="%" />
             <Slider label="Multiple sur part récurrente" min={4} max={8} step={0.5}
               value={multipleRec} onChange={setMultipleRec} unit="×" />
 
+            {/* Comparison table: today | N+3 | N+5 */}
             <div style={{
-              background: "#0a0f1a", borderRadius: 8, padding: 14, marginTop: 10,
+              background: "#0a0f1a", borderRadius: 8, padding: 14, marginTop: 14,
               border: `1px solid ${CARD_BORDER}`,
             }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 11, color: "#92702a" }}>Valorisation projetée</span>
-                <span style={{ fontSize: 16, fontWeight: 700, color: ORANGE }}>{fmt(Math.round(valeurSASProj))} €</span>
+              <div style={{
+                display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr", gap: 8,
+                fontSize: 11, alignItems: "center",
+              }}>
+                <div style={{ color: "#64748b", fontWeight: 600 }}></div>
+                <div style={{ color: "#92702a", fontWeight: 600, textAlign: "right" }}>Aujourd'hui</div>
+                <div style={{ color: "#fbbf24", fontWeight: 600, textAlign: "right" }}>N+3</div>
+                <div style={{ color: "#22c55e", fontWeight: 600, textAlign: "right" }}>N+5</div>
+
+                {[
+                  { label: "CA", today: ca, n3: projN3.ca, n5: projN5.ca, unit: "€" },
+                  { label: "EBITDA normatif", today: ebitdaNormatif, n3: projN3.ebitda, n5: projN5.ebitda, unit: "€" },
+                  { label: "Récurrent capitalisé", today: 0, n3: projN3.recurrent, n5: projN5.recurrent, unit: "€" },
+                  { label: "Valorisation SAS", today: valeurSAS, n3: projN3.sas, n5: projN5.sas, unit: "€", bold: true },
+                  { label: "Prix par part", today: prixPart, n3: projN3.part, n5: projN5.part, unit: "€", bold: true },
+                  { label: "Good leaver / part", today: prix.good, n3: projN3.goodPrice, n5: projN5.goodPrice, unit: "€" },
+                ].map((row, i) => (
+                  <div key={i} style={{ display: "contents" }}>
+                    <div style={{ color: row.bold ? "#cbd5e1" : "#94a3b8", fontWeight: row.bold ? 600 : 400 }}>{row.label}</div>
+                    <div style={{ textAlign: "right", color: "#64748b", fontWeight: row.bold ? 600 : 400 }}>
+                      {fmt(Math.round(row.today))} {row.unit}
+                    </div>
+                    <div style={{ textAlign: "right", color: "#fbbf24", fontWeight: row.bold ? 700 : 500 }}>
+                      {fmt(Math.round(row.n3))} {row.unit}
+                    </div>
+                    <div style={{ textAlign: "right", color: "#22c55e", fontWeight: row.bold ? 700 : 500 }}>
+                      {fmt(Math.round(row.n5))} {row.unit}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 11, color: "#92702a" }}>Par part (1/{nbAssocies})</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#fbbf24" }}>{fmt(Math.round(prixPartProj))} €</span>
+
+              <div style={{ height: 1, background: CARD_BORDER, margin: "12px 0" }} />
+
+              <div style={{
+                display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12,
+              }}>
+                <div style={{
+                  padding: 10, background: "#0a0f1a", borderRadius: 6,
+                  border: "1px solid #92702a40",
+                }}>
+                  <div style={{ fontSize: 10, color: "#fbbf24", marginBottom: 4 }}>Δ N+3 (good leaver)</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24" }}>
+                    {projN3.deltaGoodVsToday >= 0 ? "+" : ""}{fmt(Math.round(projN3.deltaGoodVsToday))} € / part
+                  </div>
+                  <div style={{ fontSize: 9, color: "#92702a", marginTop: 3 }}>
+                    ×{projN3.multiplierVsToday.toFixed(2)} vs aujourd'hui
+                  </div>
+                </div>
+                <div style={{
+                  padding: 10, background: "#0a0f1a", borderRadius: 6,
+                  border: "1px solid #22c55e40",
+                }}>
+                  <div style={{ fontSize: 10, color: "#22c55e", marginBottom: 4 }}>Δ N+5 (good leaver)</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#22c55e" }}>
+                    {projN5.deltaGoodVsToday >= 0 ? "+" : ""}{fmt(Math.round(projN5.deltaGoodVsToday))} € / part
+                  </div>
+                  <div style={{ fontSize: 9, color: "#16a34a", marginTop: 3 }}>
+                    ×{projN5.multiplierVsToday.toFixed(2)} vs aujourd'hui
+                  </div>
+                </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, borderTop: `1px solid ${CARD_BORDER}` }}>
-                <span style={{ fontSize: 11, color: "#22c55e" }}>Δ vs aujourd'hui (good leaver)</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#22c55e" }}>
-                  {deltaGood >= 0 ? "+" : ""}{fmt(Math.round(deltaGood))} € / part
-                </span>
+
+              <div style={{
+                marginTop: 12, padding: "8px 10px", background: "#0a0f1a",
+                borderRadius: 5, fontSize: 10, color: "#64748b", lineHeight: 1.5,
+                fontStyle: "italic",
+              }}>
+                <strong style={{ color: "#94a3b8" }}>Lecture :</strong> à {caGrowth}%/an de
+                croissance, le CA passe de {fmt(Math.round(ca))}€ à {fmt(Math.round(projN5.ca))}€ en 5 ans.
+                Le multiple sur la part récurrente ({multipleRec}×) capitalise les abonnements/contrats
+                cadres comme un actif, ce qui amplifie la valo bien plus que le multiple EBITDA seul.
               </div>
             </div>
           </div>
